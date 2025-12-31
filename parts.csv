@@ -1,0 +1,21 @@
+﻿Level Sensor,75,25
+Enclosure,15,
+PVC,40,
+Pump,30,
+Wires,1,
+Solder,0.1,
+Breadboard,5,
+Pico,5,
+Arduino,20,
+Pico W,,7
+Resistors,0.1,
+Sd Card Module,2,
+Lipo Battery,15,
+Buck Converter,9,
+L298n motor driver,3,
+Iipo shim,10,
+sdcard,10,
+lipopico,,15
+relay,6,
+batterypump,40,
+,286.2,
