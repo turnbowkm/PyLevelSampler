@@ -150,7 +150,7 @@ def main():
             
             if level is not None:
                 status = control_pump(level)
-                output = f"Level: {level:.2f} in | Status: {status}"
+                output = f"Level: {level:.2f} in , Status: {status}"
                 print(output)
                 log_to_sd(output)
                 
