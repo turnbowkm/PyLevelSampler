@@ -5,3 +5,5 @@ The wiring diagram:
   https://app.cirkitdesigner.com/project/9785049d-6816-4f2b-bdfe-39b32559779f
 Raspberry Pi Pico2 documentation:
   https://www.raspberrypi.com/documentation/microcontrollers/pico-series.html
+Thonny: 
+  https://thonny.org/
