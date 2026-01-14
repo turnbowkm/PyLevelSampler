@@ -1,0 +1,13 @@
+Component,Component Pin,Pico Physical Pin,Pico GPIO Label
+L298N Driver,ENA,Pin 17,GP13
+,IN1,Pin 20,GP15
+,IN2,Pin 19,GP14
+,GND,"Pin 18, 23, or 28",GND
+SD Card Module,CS,Pin 7,GP5
+,SCK (CLK),Pin 4,GP2
+,MOSI (DI),Pin 5,GP3
+,MISO (DO),Pin 6,GP4
+,VCC,Pin 36,3V3(OUT)
+,GND,Pin 3,GND
+Fuel Sender,Signal Out,Pin 31,GP26 (ADC0)
+,Ground,Pin 33,GND
