@@ -41,7 +41,12 @@ LEVEL_EMPTY_INCHES = 0.0
 LEVEL_FULL_INCHES = 10.0
 
 # Moving average filter settings
-FILTER_WINDOW_SIZE = 5  # Number of readings to average 
+FILTER_WINDOW_SIZE = 5  # Number of readings to average
+
+# Temperature compensation settings
+TEMP_COMPENSATION_ENABLED = True
+CALIBRATION_TEMP_C = 20.0  # Temperature at which you calibrated (Celsius)
+TEMP_COEFF_PPM_PER_C = 30  # Parts per million per degree C (typical for time-of-flight sensors) 
 
 # --- 3. GLOBAL OBJECTS ---
 pump_in1 = None
@@ -52,6 +57,7 @@ sd = None
 pump_state = False  # Track current pump state
 reading_buffer = []  # Buffer for moving average filter
 failed_read_count = 0  # Track consecutive failed reads
+last_temperature_c = None  # Track sensor temperature
 
 # --- 4. HELPER FUNCTIONS ---
 
@@ -118,11 +124,13 @@ def map_value(x, in_min, in_max, out_min, out_max):
 
 def read_tf_luna():
     """
-    Read distance from TF Luna LiDAR sensor.
+    Read distance and temperature from TF Luna LiDAR sensor.
     TF Luna standard data format: 9 bytes per frame
     [0x59, 0x59, Dist_L, Dist_H, Strength_L, Strength_H, Temp_L, Temp_H, Checksum]
-    Returns distance in cm or None if read fails.
+    Returns tuple (distance_cm, temperature_c) or (None, None) if read fails.
     """
+    global last_temperature_c
+    
     try:
         start_time = time.ticks_ms()
         
@@ -130,7 +138,7 @@ def read_tf_luna():
         while lidar_uart.any() < 9:
             if time.ticks_diff(time.ticks_ms(), start_time) > LIDAR_TIMEOUT_MS:
                 print("⚠️ LiDAR read timeout")
-                return None
+                return None, None
             time.sleep_ms(10)
         
         # Read available data
@@ -145,27 +153,63 @@ def read_tf_luna():
                 # Extract distance (low byte + high byte)
                 distance_cm = data[2] + (data[3] << 8)
                 
+                # Extract temperature (low byte + high byte)
+                # Temperature is in 0.01°C units, divide by 100
+                temp_raw = data[6] + (data[7] << 8)
+                temperature_c = temp_raw / 100.0
+                
                 # Sanity check: TF Luna range is 0.2m to 8m
                 if 20 <= distance_cm <= 800:
-                    return distance_cm
+                    last_temperature_c = temperature_c
+                    return distance_cm, temperature_c
                 else:
                     print(f"⚠️ Distance out of range: {distance_cm}cm")
-                    return None
+                    return None, last_temperature_c
             else:
                 print("⚠️ LiDAR checksum error")
-                return None
+                return None, None
         else:
             # Clear buffer if header is invalid
             lidar_uart.read()
-            return None
+            return None, None
             
     except Exception as e:
         print(f"❌ Error reading TF Luna: {e}")
-        return None
+        return None, None
+
+def apply_temperature_compensation(distance_cm, temperature_c):
+    """
+    Apply temperature compensation to distance measurement.
+    
+    Speed of light varies with temperature, affecting time-of-flight measurements.
+    Formula: distance_compensated = distance_raw * (1 + α * ΔT)
+    where α is the temperature coefficient and ΔT is temp difference from calibration
+    
+    Args:
+        distance_cm: Raw distance measurement
+        temperature_c: Current temperature in Celsius
+    
+    Returns:
+        Temperature-compensated distance in cm
+    """
+    if not TEMP_COMPENSATION_ENABLED or temperature_c is None:
+        return distance_cm
+    
+    # Calculate temperature difference from calibration point
+    temp_delta = temperature_c - CALIBRATION_TEMP_C
+    
+    # Convert PPM to decimal (30 PPM = 0.000030 per degree)
+    temp_coefficient = TEMP_COEFF_PPM_PER_C / 1_000_000.0
+    
+    # Apply compensation factor
+    compensation_factor = 1.0 + (temp_coefficient * temp_delta)
+    compensated_distance = distance_cm * compensation_factor
+    
+    return compensated_distance
 
 def read_water_level():
     """
-    Read water level using TF Luna LiDAR with moving average filter.
+    Read water level using TF Luna LiDAR with moving average filter and temperature compensation.
     Converts distance measurement to water level in inches.
     Note: LiDAR measures distance TO water surface, so:
     - Greater distance = less water (empty)
@@ -174,13 +218,16 @@ def read_water_level():
     global reading_buffer
     
     try:
-        distance_cm = read_tf_luna()
+        distance_cm, temperature_c = read_tf_luna()
         
         if distance_cm is None:
-            return None
+            return None, None
+        
+        # Apply temperature compensation
+        compensated_distance = apply_temperature_compensation(distance_cm, temperature_c)
         
         # Add to moving average buffer
-        reading_buffer.append(distance_cm)
+        reading_buffer.append(compensated_distance)
         if len(reading_buffer) > FILTER_WINDOW_SIZE:
             reading_buffer.pop(0)
         
@@ -199,11 +246,11 @@ def read_water_level():
         if inches > LEVEL_FULL_INCHES: 
             inches = LEVEL_FULL_INCHES
             
-        return inches
+        return inches, temperature_c
         
     except Exception as e:
         print(f"❌ Error calculating water level: {e}")
-        return None
+        return None, None
 
 def log_to_sd(message):
     """Appends a timestamped message to the log file."""
@@ -256,16 +303,30 @@ def main():
     print("\n🚀 Starting water level monitoring with TF Luna LiDAR...")
     print(f"📊 Pump threshold: {PUMP_THRESHOLD_INCHES} inches (±{PUMP_ON_HYSTERESIS}/{PUMP_OFF_HYSTERESIS} hysteresis)")
     print(f"📏 LiDAR calibration: Empty={DISTANCE_EMPTY_CM}cm, Full={DISTANCE_FULL_CM}cm")
-    print(f"🔧 Filter window: {FILTER_WINDOW_SIZE} readings\n")
+    print(f"🔧 Filter window: {FILTER_WINDOW_SIZE} readings")
+    if TEMP_COMPENSATION_ENABLED:
+        print(f"🌡️  Temperature compensation: ENABLED (calibrated at {CALIBRATION_TEMP_C}°C)")
+    else:
+        print(f"🌡️  Temperature compensation: DISABLED")
+    print()
     
     while True:
         try:
-            level_inches = read_water_level()
+            level_inches, temperature_c = read_water_level()
             
             if level_inches is not None:
                 failed_read_count = 0  # Reset failure counter
-                print(f"[{time.time()}] Current Level: {level_inches:.2f} inches")
-                log_to_sd(f"Level: {level_inches:.2f} in")
+                
+                # Display reading with temperature
+                temp_str = f", Temp: {temperature_c:.1f}°C" if temperature_c is not None else ""
+                print(f"[{time.time()}] Level: {level_inches:.2f} inches{temp_str}")
+                
+                # Log with temperature data
+                log_message = f"Level: {level_inches:.2f} in"
+                if temperature_c is not None:
+                    log_message += f", Temp: {temperature_c:.1f}°C"
+                log_to_sd(log_message)
+                
                 control_pump(level_inches)
             else:
                 failed_read_count += 1
