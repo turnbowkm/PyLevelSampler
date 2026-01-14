@@ -1,21 +1,17 @@
-﻿Level Sensor,75,25
+﻿Level Sensor,75,
 Enclosure,15,
 PVC,40,
 Pump,30,
 Wires,1,
 Solder,0.1,
 Breadboard,5,
-Pico,5,
-Arduino,20,
-Pico W,,7
 Resistors,0.1,
-Sd Card Module,2,
+Sd Card Module,2,https://www.amazon.com/HiLetgo-Adater-Interface-Conversion-Arduino/dp/B07BJ2P6X6/ref=sr_1_1_sspa?dib=eyJ2IjoiMSJ9.aWM2MrxhONxxTLmTiowiALuT4M6qxuwWn68TOEpfxejl_cnGzLdRIuq9WKzH0ljLE_TukdSmCqBilDvAP32SQ7y8b44otrrZJA38aYvLDajIO4t8c5zIRQSJh3tjESz8epJAY7RhboQogPDStL1vFo7_FPmtdme_OLAaum8I4gM_X1BoJbEJ0SN_lMd8aEa_jPUgDnG__Vgdn04_QBO7XT0B3hSa2cT47SqXoR2QR6E.APHruHVntNq5vxKnF-hF13J18IMAh32QX8reX-4ctn8&dib_tag=se&keywords=arduino+sd+card+module&qid=1768365060&sr=8-1-spons&sp_csd=d2lkZ2V0TmFtZT1zcF9hdGY&psc=1,
 Lipo Battery,15,
 Buck Converter,9,
-L298n motor driver,3,
-Iipo shim,10,
+L298n motor driver,3,https://www.amazon.com/BOJACK-H-Bridge-Controller-Intelligent-Mega2560/dp/B0C5JCF5RS/ref=sr_1_3?crid=IHP8VVOY5UZQ&dib=eyJ2IjoiMSJ9.hK2FjV8Ukp8CCyVTI1seMk4n3aguoO_lNXX3xoiH-O1r6XKJmqVsOZVPP7-E0fhkWd6847vyhQ6vmcEnrvFmDgSGPqGzNYpkhJG1JwuvH_KU2XzVnxZKZ0qqivJyPBIHKRo8Zgjj4_OJg3lfqEutdlz-CmO2ZLG9qBp1e-NviO-V4kHge0-Vh_Yc8k1ZrF2rOObrFs5-8DzAmajDiQwvhlDyJ-lfanpXKwwfC0el1Fg.zTCKIp8ycifSfP_IKLywlACleOk9krGm2afnjawq-Rs&dib_tag=se&keywords=l298n+motor+driver&qid=1768365099&sprefix=l2%2Caps%2C174&sr=8-3
 sdcard,10,
-lipopico,,15
+lipopico,15,https://www.microcenter.com/product/640667/pimoroni-pimoroni-pico-lipo-16mb,
 relay,6,
 batterypump,40,
-,286.2,
+
