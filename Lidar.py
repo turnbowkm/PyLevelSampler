@@ -24,8 +24,12 @@ SD_SPI_MISO = 4  # Master In Slave Out (MISO)
 
 # --- 2. LOGIC & CALIBRATION (FILL THESE IN!) ---
 PUMP_THRESHOLD_INCHES = 5.0
+PUMP_ON_HYSTERESIS = 0.5  # Turn on when level > threshold + hysteresis
+PUMP_OFF_HYSTERESIS = 0.5  # Turn off when level < threshold - hysteresis
 LOG_FILE_PATH = "/sd/water_log.txt"
-LOOP_DELAY_SECONDS = 5 
+LOOP_DELAY_SECONDS = 5
+LIDAR_TIMEOUT_MS = 1000  # Timeout for LiDAR reads
+MAX_FAILED_READS = 3  # Stop pump after this many consecutive failed reads
 
 # Calibrated distance values (Must be determined experimentally!)
 # Distance from sensor to EMPTY tank bottom (in cm)
@@ -34,7 +38,10 @@ DISTANCE_EMPTY_CM = 100.0  # Example: sensor 100cm from empty tank bottom
 DISTANCE_FULL_CM = 20.0    # Example: sensor 20cm from full water level
 # Tank depth in inches
 LEVEL_EMPTY_INCHES = 0.0
-LEVEL_FULL_INCHES = 10.0 
+LEVEL_FULL_INCHES = 10.0
+
+# Moving average filter settings
+FILTER_WINDOW_SIZE = 5  # Number of readings to average 
 
 # --- 3. GLOBAL OBJECTS ---
 pump_in1 = None
@@ -42,6 +49,9 @@ pump_in2 = None
 pump_ena = None
 lidar_uart = None
 sd = None
+pump_state = False  # Track current pump state
+reading_buffer = []  # Buffer for moving average filter
+failed_read_count = 0  # Track consecutive failed reads
 
 # --- 4. HELPER FUNCTIONS ---
 
@@ -114,27 +124,39 @@ def read_tf_luna():
     Returns distance in cm or None if read fails.
     """
     try:
-        if lidar_uart.any() >= 9:
-            # Read available data
-            data = lidar_uart.read(9)
+        start_time = time.ticks_ms()
+        
+        # Wait for data with timeout
+        while lidar_uart.any() < 9:
+            if time.ticks_diff(time.ticks_ms(), start_time) > LIDAR_TIMEOUT_MS:
+                print("⚠️ LiDAR read timeout")
+                return None
+            time.sleep_ms(10)
+        
+        # Read available data
+        data = lidar_uart.read(9)
+        
+        # Check for valid frame header (0x59 0x59)
+        if data[0] == 0x59 and data[1] == 0x59:
+            # Calculate checksum
+            checksum = sum(data[0:8]) & 0xFF
             
-            # Check for valid frame header (0x59 0x59)
-            if data[0] == 0x59 and data[1] == 0x59:
-                # Calculate checksum
-                checksum = sum(data[0:8]) & 0xFF
+            if checksum == data[8]:
+                # Extract distance (low byte + high byte)
+                distance_cm = data[2] + (data[3] << 8)
                 
-                if checksum == data[8]:
-                    # Extract distance (low byte + high byte)
-                    distance_cm = data[2] + (data[3] << 8)
+                # Sanity check: TF Luna range is 0.2m to 8m
+                if 20 <= distance_cm <= 800:
                     return distance_cm
                 else:
-                    print("⚠️ LiDAR checksum error")
+                    print(f"⚠️ Distance out of range: {distance_cm}cm")
                     return None
             else:
-                # Clear buffer if header is invalid
-                lidar_uart.read()
+                print("⚠️ LiDAR checksum error")
                 return None
         else:
+            # Clear buffer if header is invalid
+            lidar_uart.read()
             return None
             
     except Exception as e:
@@ -143,21 +165,31 @@ def read_tf_luna():
 
 def read_water_level():
     """
-    Read water level using TF Luna LiDAR.
+    Read water level using TF Luna LiDAR with moving average filter.
     Converts distance measurement to water level in inches.
     Note: LiDAR measures distance TO water surface, so:
     - Greater distance = less water (empty)
     - Shorter distance = more water (full)
     """
+    global reading_buffer
+    
     try:
         distance_cm = read_tf_luna()
         
         if distance_cm is None:
             return None
         
+        # Add to moving average buffer
+        reading_buffer.append(distance_cm)
+        if len(reading_buffer) > FILTER_WINDOW_SIZE:
+            reading_buffer.pop(0)
+        
+        # Calculate average
+        avg_distance = sum(reading_buffer) / len(reading_buffer)
+        
         # Convert distance to water level
         # The farther the distance, the lower the water level
-        inches = map_value(distance_cm, 
+        inches = map_value(avg_distance, 
                           DISTANCE_FULL_CM, DISTANCE_EMPTY_CM,  # Note: reversed
                           LEVEL_FULL_INCHES, LEVEL_EMPTY_INCHES)
         
@@ -186,19 +218,34 @@ def log_to_sd(message):
         print(f"Error writing to SD card: {e}")
 
 def control_pump(current_level):
-    """Control pump based on water level threshold."""
-    if current_level > PUMP_THRESHOLD_INCHES:
-        # Turn ON
-        pump_in1.value(1)
-        pump_in2.value(0)
-        pump_ena.duty_u16(65535)
-        print("Status: PUMPING")
+    """
+    Control pump based on water level threshold with hysteresis.
+    Hysteresis prevents rapid on/off cycling (chattering).
+    """
+    global pump_state
+    
+    if pump_state:
+        # Pump is currently ON - turn off if below lower threshold
+        if current_level < (PUMP_THRESHOLD_INCHES - PUMP_OFF_HYSTERESIS):
+            pump_ena.duty_u16(0)
+            pump_in1.value(0)
+            pump_in2.value(0)
+            pump_state = False
+            log_to_sd(f"Pump OFF - Level: {current_level:.2f} in")
+            print("Status: STOPPED (below threshold)")
     else:
-        # FORCE OFF - If level is at or below threshold
-        pump_ena.duty_u16(0)
-        pump_in1.value(0)
-        pump_in2.value(0)
-        print("Status: STOPPED")
+        # Pump is currently OFF - turn on if above upper threshold
+        if current_level > (PUMP_THRESHOLD_INCHES + PUMP_ON_HYSTERESIS):
+            pump_in1.value(1)
+            pump_in2.value(0)
+            pump_ena.duty_u16(65535)
+            pump_state = True
+            log_to_sd(f"Pump ON - Level: {current_level:.2f} in")
+            print("Status: PUMPING")
+    
+    # Print current state for monitoring
+    state_str = "PUMPING" if pump_state else "STOPPED"
+    print(f"Pump: {state_str}, Level: {current_level:.2f} in, Threshold: {PUMP_THRESHOLD_INCHES} in")
         
 # --- 5. MAIN LOOP ---
 def main():
@@ -207,19 +254,32 @@ def main():
         return 
 
     print("\n🚀 Starting water level monitoring with TF Luna LiDAR...")
-    print(f"📊 Pump threshold: {PUMP_THRESHOLD_INCHES} inches")
-    print(f"📏 LiDAR calibration: Empty={DISTANCE_EMPTY_CM}cm, Full={DISTANCE_FULL_CM}cm\n")
+    print(f"📊 Pump threshold: {PUMP_THRESHOLD_INCHES} inches (±{PUMP_ON_HYSTERESIS}/{PUMP_OFF_HYSTERESIS} hysteresis)")
+    print(f"📏 LiDAR calibration: Empty={DISTANCE_EMPTY_CM}cm, Full={DISTANCE_FULL_CM}cm")
+    print(f"🔧 Filter window: {FILTER_WINDOW_SIZE} readings\n")
     
     while True:
         try:
             level_inches = read_water_level()
             
             if level_inches is not None:
+                failed_read_count = 0  # Reset failure counter
                 print(f"[{time.time()}] Current Level: {level_inches:.2f} inches")
                 log_to_sd(f"Level: {level_inches:.2f} in")
                 control_pump(level_inches)
             else:
-                print("⚠️ Failed to read water level from LiDAR")
+                failed_read_count += 1
+                print(f"⚠️ Failed to read water level from LiDAR (attempt {failed_read_count}/{MAX_FAILED_READS})")
+                
+                # Safety: stop pump after consecutive failures
+                if failed_read_count >= MAX_FAILED_READS:
+                    if pump_state:
+                        pump_ena.duty_u16(0)
+                        pump_in1.value(0)
+                        pump_in2.value(0)
+                        pump_state = False
+                        log_to_sd("SAFETY: Pump stopped due to sensor failure")
+                        print("🛑 SAFETY: Pump stopped due to repeated sensor failures")
                 
             time.sleep(LOOP_DELAY_SECONDS)
             
