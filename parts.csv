@@ -11,8 +11,9 @@ Lipo Battery,15,
 Buck Converter,9,
 L298n motor driver,3,https://www.amazon.com/BOJACK-H-Bridge-Controller-Intelligent-Mega2560/dp/B0C5JCF5RS/ref=sr_1_3?crid=IHP8VVOY5UZQ&dib=eyJ2IjoiMSJ9.hK2FjV8Ukp8CCyVTI1seMk4n3aguoO_lNXX3xoiH-O1r6XKJmqVsOZVPP7-E0fhkWd6847vyhQ6vmcEnrvFmDgSGPqGzNYpkhJG1JwuvH_KU2XzVnxZKZ0qqivJyPBIHKRo8Zgjj4_OJg3lfqEutdlz-CmO2ZLG9qBp1e-NviO-V4kHge0-Vh_Yc8k1ZrF2rOObrFs5-8DzAmajDiQwvhlDyJ-lfanpXKwwfC0el1Fg.zTCKIp8ycifSfP_IKLywlACleOk9krGm2afnjawq-Rs&dib_tag=se&keywords=l298n+motor+driver&qid=1768365099&sprefix=l2%2Caps%2C174&sr=8-3
 sdcard,10,
-lipopico,15,https://www.microcenter.com/product/640667/pimoroni-pimoroni-pico-lipo-16mb,
+lipopico,15,https://www.microcenter.com/product/640667/pimoroni-pimoroni-pico-lipo-16mb
 relay,6,
 batterypump,40,
+
 
 
