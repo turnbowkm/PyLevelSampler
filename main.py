@@ -48,6 +48,7 @@ def setup():
         pump_in1 = machine.Pin(PUMP_IN1, machine.Pin.OUT)
         pump_in2 = machine.Pin(PUMP_IN2, machine.Pin.OUT)
         pump_ena = machine.PWM(machine.Pin(PUMP_ENA))
+        pump_ena.freq(1000)
         pump_in1.value(0)
         pump_in2.value(0)
         pump_ena.duty_u16(0) 
