@@ -1,86 +1,63 @@
-import machine
-import os
-import time
+# --- ADD THESE TO YOUR CALIBRATION SECTION ---
+PUMP_HEIGHT_CM = 10.0  # Physical height where the pump sits
+PRIME_DURATION_BASE = 2.0  # Minimum seconds to prime
+PRIME_FACTOR = 0.5         # Extra seconds per inch of "lift"
 
-# Attempt to import the SD Card driver
-try:
-    import sdcard
-except ImportError:
-    print("❌ ERROR: sdcard.py not found on Pico! Upload it via Thonny first.")
+# Add a global variable to track state
+is_pumping = False
 
-# --- PIN CONFIG ---
-PUMP_IN1, PUMP_IN2, PUMP_ENA = 15, 14, 13
-LIDAR_TX, LIDAR_RX = 8, 9
-SD_CS, SD_SCK, SD_MOSI, SD_MISO = 5, 2, 3, 4
-
-# --- CALIBRATION ---
-PUMP_THRESHOLD = 5.0
-EMPTY_CM, FULL_CM = 100.0, 20.0
-EMPTY_IN, FULL_IN = 0.0, 10.0
-
-# --- HARDWARE SETUP ---
-def setup_hardware():
-    try:
-        # Pump
-        p1 = machine.Pin(PUMP_IN1, machine.Pin.OUT)
-        p2 = machine.Pin(PUMP_IN2, machine.Pin.OUT)
-        en = machine.PWM(machine.Pin(PUMP_ENA))
-        p1.value(0); p2.value(0); en.duty_u16(0)
-
-        # LiDAR (UART1)
-        uart = machine.UART(1, baudrate=115200, tx=machine.Pin(LIDAR_TX), rx=machine.Pin(LIDAR_RX))
-
-        # SD Card (SPI0)
-        spi = machine.SPI(0, baudrate=1000000, sck=machine.Pin(SD_SCK), mosi=machine.Pin(SD_MOSI), miso=machine.Pin(SD_MISO))
-        cs = machine.Pin(SD_CS, machine.Pin.OUT)
-        sd = sdcard.SDCard(spi, cs)
-        vfs = os.VfsFat(sd)
-        os.mount(vfs, "/sd")
-        
-        return p1, p2, en, uart
-    except Exception as e:
-        print(f"❌ Hardware Init Failed: {e}")
-        return None, None, None, None
-
-def get_reading(uart):
-    # Clear old data
-    while uart.any(): uart.read()
+def prime_pump(p1, p2, en, lift_inches):
+    """
+    Runs the pump at full speed to clear air.
+    Duration scales based on how far the water has to travel.
+    """
+    # Calculate duration: further water = longer prime
+    duration = PRIME_DURATION_BASE + (lift_inches * PRIME_FACTOR)
+    duration = min(duration, 10.0) # Cap at 10s for safety
     
-    # Wait for frame
-    start = time.ticks_ms()
-    while uart.any() < 9:
-        if time.ticks_diff(time.ticks_ms(), start) > 500: return None
+    print(f"🌊 Priming: Lift is {lift_inches:.1f}in. Running for {duration:.1f}s...")
     
-    data = uart.read(9)
-    if data[0] == 0x59 and data[1] == 0x59:
-        if (sum(data[:8]) & 0xFF) == data[8]:
-            return data[2] + (data[3] << 8)
-    return None
+    p1.value(1)
+    p2.value(0)
+    en.duty_u16(65535) # Max Power
+    time.sleep(duration)
+    print("✅ Priming Complete.")
 
+# --- MODIFIED MAIN LOOP LOGIC ---
 def main():
+    global is_pumping
     p1, p2, en, uart = setup_hardware()
-    if not p1: return # Stop if hardware fails
+    if not p1: return 
 
-    print("🚀 System Running...")
-    
     while True:
         raw_cm = get_reading(uart)
         if raw_cm:
-            # Simple Map: (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
             inches = (raw_cm - FULL_CM) * (EMPTY_IN - FULL_IN) / (EMPTY_CM - FULL_CM) + FULL_IN
             inches = max(min(inches, FULL_IN), EMPTY_IN)
             
-            # Pump Logic
-            if inches > (PUMP_THRESHOLD + 0.5):
-                p1.value(1); p2.value(0); en.duty_u16(65535)
-            elif inches < (PUMP_THRESHOLD - 0.5):
-                p1.value(0); p2.value(0); en.duty_u16(0)
-                
-            print(f"Level: {inches:.2f} in (Raw: {raw_cm} cm)")
-        else:
-            print("⚠️ LiDAR timeout")
+            # Distance from water to the pump (Lift)
+            # Assuming raw_cm is distance from sensor (at top) to water
+            # and pump is mounted somewhere in between.
+            lift_cm = raw_cm - PUMP_HEIGHT_CM
+            lift_inches = lift_cm * 0.3937 # Convert to inches
             
-        time.sleep(2)
-
-if __name__ == "__main__":
-    main()
+            # --- PRIMING & CONTROL LOGIC ---
+            if inches > (PUMP_THRESHOLD + 0.2):
+                if not is_pumping:
+                    # We were OFF, now turning ON -> Trigger Prime
+                    prime_pump(p1, p2, en, max(0, lift_inches))
+                    is_pumping = True
+                
+                # Normal running speed (maybe 80% power to save the motor)
+                p1.value(1); p2.value(0); en.duty_u16(50000) 
+                
+            elif inches < (PUMP_THRESHOLD - 0.2):
+                p1.value(0); p2.value(0); en.duty_u16(0)
+                is_pumping = False
+            
+            log_data(raw_cm, inches)
+        else:
+            p1.value(0); p2.value(0); en.duty_u16(0)
+            is_pumping = False
+            
+        time.sleep(1)
